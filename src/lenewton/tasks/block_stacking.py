@@ -8,10 +8,10 @@ import newton
 import numpy as np
 import warp as wp
 
-from lenewton.task import LeNewtonTask
+from lenewton.tasks.lenewton_task import LeNewtonTask
 
 if TYPE_CHECKING:
-    from lenewton.envs.lenewton.env import LeNewtonEnv
+    from lenewton.env import LeNewtonEnv
 
 log = logging.getLogger(__name__)
 

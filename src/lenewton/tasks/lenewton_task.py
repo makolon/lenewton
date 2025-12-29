@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from lenewton.envs.lenewton.env import LeNewtonEnv
+    from lenewton.env import LeNewtonEnv
 
 log = logging.getLogger(__name__)
 
