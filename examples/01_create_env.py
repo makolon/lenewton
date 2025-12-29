@@ -22,8 +22,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-JOINT_OFFSETS = np.array([[0.0, 1.70, -1.70, -0.921, -0.0120, 0.0]])
-
 
 def main():
     """Main function to run the LeNewton environment example."""
@@ -71,8 +69,7 @@ def main():
     log.info("Starting motion test...")
     for i in range(100):
         # Maintain current joint positions
-        action = init_joint_q + np.random.uniform(.0, 2.0, size=init_joint_q.shape)
-        action = action + JOINT_OFFSETS
+        action = init_joint_q
         obs, reward, done, info = env.step(action)
 
         # Log every 10 steps
@@ -84,11 +81,6 @@ def main():
         if done:
             log.info(f"Task completed at step {i}")
             break
-
-    # Save video if recording was enabled
-    video_path = env.video_recorder.save_video("block_stack_demo.mp4")
-    if video_path:
-        log.info(f"Video saved to: {video_path}")
 
     # Clean up
     env.close()

@@ -60,7 +60,7 @@ dependencies = [
     "newton",
     "mujoco-warp",
     "trimesh>=4.10.0",
-    "warp-lang==1.11.0.dev20251203",
+    "warp-lang>=1.11.0.dev20251205",
     # PyTorch
     "kmeans-pytorch>=0.3",
     "torchmetrics>=1.8.2",

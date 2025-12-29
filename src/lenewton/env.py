@@ -11,7 +11,7 @@ import newton.viewer
 import numpy as np
 import warp as wp
 from newton.selection import ArticulationView
-from newton.sensors import TiledCameraSensor
+from newton.sensors import SensorTiledCamera
 
 import lenewton  # noqa: F401
 
@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
 # SO100 robot configuration
 ASSETS_PATH = os.path.join(lenewton.LENEWTON_PATH, "assets")
-PROPS_PATH = os.path.join(ASSETS_PATH, "props")
-ROBOTS_PATH = os.path.join(ASSETS_PATH, "robots")
 
 # Simulation parameters
 SIM_STEPS = 10
@@ -257,7 +255,7 @@ class LeNewtonEnv:
         self.ls_parallel = False
 
         # Camera sensor
-        self.camera_sensor: TiledCameraSensor | None = None
+        self.camera_sensor: SensorTiledCamera | None = None
         self.camera_rays = None
         self.camera_color_image = None
         self.camera_depth_image = None
@@ -316,10 +314,18 @@ class LeNewtonEnv:
         builder.default_shape_cfg.mu = 0.8  # Higher friction
         builder.default_shape_cfg.collision_group = -1  # Collide with everything
 
-        # Load SO100 robot
-        robot_xml_path = os.path.join(ROBOTS_PATH, "so_arm100", "so_arm100.xml")
+        # Load SO100 robot (fall back to flat assets layout if needed)
+        robot_xml_path = os.path.join(ASSETS_PATH, "so_arm100", "so_arm100.xml")
+        if not os.path.exists(robot_xml_path):
+            alt_path = os.path.join(ASSETS_PATH, "so_arm100.xml")
+            if os.path.exists(alt_path):
+                robot_xml_path = alt_path
+            else:
+                raise FileNotFoundError(
+                    f"SO100 robot XML not found at '{robot_xml_path}' or '{alt_path}'"
+                )
         builder.add_mjcf(
-            robot_xml_path,
+            source=robot_xml_path,
             xform=wp.transform(
                 wp.vec3(0.0, 0.0, 0.0),
                 wp.quat_identity(),
@@ -400,20 +406,20 @@ class LeNewtonEnv:
         if self.viewer is not None:
             self.viewer.set_model(self.model)
 
-        # Setup TiledCameraSensor for rendering
+        # Setup SensorTiledCamera for rendering
         self._setup_camera_sensor()
 
         # Store camera parameters for coordinate transformations
         self._update_camera_params()
 
     def _setup_camera_sensor(self):
-        """Setup the TiledCameraSensor for rendering."""
-        self.camera_sensor = TiledCameraSensor(
+        """Setup the SensorTiledCamera for rendering."""
+        self.camera_sensor = SensorTiledCamera(
             model=self.model,
             num_cameras=1,
             width=self.image_size[1],  # width
             height=self.image_size[0],  # height
-            options=TiledCameraSensor.Options(
+            options=SensorTiledCamera.Options(
                 default_light=True,
                 default_light_shadows=True,
                 colors_per_world=True,
@@ -448,7 +454,9 @@ class LeNewtonEnv:
             [camera_transform[0][0], camera_transform[0][1], camera_transform[0][2]]
         )
         quat = camera_transform[1]  # wp.quatf
-        rot_matrix = wp.quat_to_matrix(quat).numpy()
+        rot = wp.quat_to_matrix(quat)
+        rot_wp = wp.array([rot], dtype=wp.mat33, device="cpu")
+        rot_matrix = rot_wp.numpy()[0]
         extrinsic = np.eye(4)
         extrinsic[:3, :3] = rot_matrix.T  # Transpose for world-to-camera
         extrinsic[:3, 3] = -rot_matrix.T @ pos
@@ -655,7 +663,7 @@ class LeNewtonEnv:
         return observation, reward, done, info
 
     def render(self) -> np.ndarray | None:
-        """Render the environment using TiledCameraSensor.
+        """Render the environment using SensorTiledCamera.
 
         Returns:
             RGB image array or None
@@ -721,7 +729,7 @@ class LeNewtonEnv:
             [[camera_transform]], dtype=wp.transformf, device=self.model.device
         )
 
-        # Render using TiledCameraSensor
+        # Render using SensorTiledCamera
         self.camera_sensor.render(
             self.state_0,
             camera_transforms,
@@ -732,7 +740,7 @@ class LeNewtonEnv:
         wp.synchronize()
 
         # Get flattened color image
-        flat_image = self.camera_sensor.flatten_color_image(self.camera_color_image)
+        flat_image = self.camera_sensor.flatten_color_image_to_rgba(self.camera_color_image)
 
         return flat_image
 
@@ -762,9 +770,9 @@ class LeNewtonEnv:
         observation["joint_velocities"] = joint_qd
 
         # End-effector pose
-        ee_pose = self.ik_solver.solve_fk(joint_q, self.state_0)
-        observation["gripper_pos"] = ee_pose.pos
-        observation["gripper_quat"] = ee_pose.quat
+        ee_pos, ee_orn = self.ik_solver.solve_fk(joint_q, self.state_0)
+        observation["gripper_pos"] = ee_pos
+        observation["gripper_quat"] = ee_orn
 
         # Camera image
         image = self.render()
