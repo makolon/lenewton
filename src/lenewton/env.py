@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import os
-from collections.abc import Callable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -947,41 +946,3 @@ class LeNewtonEnv:
         self.viewer.log_state(self.state_0)
         self.viewer.end_frame()
         wp.synchronize()
-
-
-def _default_task_factory(task_name: str):
-    """Create a task instance from a task name."""
-    try:
-        from lenewton.tasks import BlockStackTask
-    except Exception:
-        return None
-
-    registry = {
-        "BlockStack": BlockStackTask,
-    }
-
-    task_cls = registry.get(task_name)
-    if task_cls is None:
-        return None
-    return task_cls(task_name=task_name)
-
-
-def create_lenewton_env(
-    task_name: str = "BlockStack",
-    task_factory: Callable[[str], LeNewtonTask | None] | None = None,
-    **kwargs,
-) -> LeNewtonEnv:
-    """Helper to build a LeNewtonEnv from a task name."""
-    factory = task_factory or _default_task_factory
-    task = factory(task_name) if factory else None
-
-    if task is None:
-        print(
-            f"[WARN] No task registered for '{task_name}', creating environment without a task."
-        )
-
-    return LeNewtonEnv(
-        task=task,
-        task_name=task_name,
-        **kwargs,
-    )
