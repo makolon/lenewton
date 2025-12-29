@@ -74,8 +74,9 @@ lenewton/
 │   └── lenewton/
 │       ├── assets/     # Robot URDFs, meshes, and scene XMLs
 │       ├── tasks/      # Task definitions (e.g., BlockStackTask)
-│       ├── env.py      # Main environment class
-│       └── task.py     # Base task class
+│       ├── teleop/     # Teleoperation & data collection
+│       ├── utils/      # Utilities for simulation
+│       └── env.py      # Main environment class
 ├── pyproject.toml      # Project configuration and dependencies
 └── README.md
 ```
