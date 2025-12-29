@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import newton
 import newton.ik
@@ -967,7 +968,7 @@ def _default_task_factory(task_name: str):
 
 def create_lenewton_env(
     task_name: str = "BlockStack",
-    task_factory: Callable[[str], "LeNewtonTask | None"] | None = None,
+    task_factory: Callable[[str], LeNewtonTask | None] | None = None,
     **kwargs,
 ) -> LeNewtonEnv:
     """Helper to build a LeNewtonEnv from a task name."""
