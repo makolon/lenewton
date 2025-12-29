@@ -9,18 +9,8 @@ This script shows how to:
 4. Interact with objects in the scene
 """
 
-import logging
-
-import numpy as np
-
 from lenewton.env import LeNewtonEnv
 from lenewton.tasks import BlockStackTask
-
-# Set up logging with DEBUG level to see step details
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-log = logging.getLogger(__name__)
 
 
 def main():
@@ -44,12 +34,12 @@ def main():
         render_fps=30,
     )
 
-    log.info("Environment created successfully")
+    print("Environment created successfully")
 
     # Reset environment
     obs = env.reset()
-    log.info(f"Initial joint positions: {obs['joint_positions']}")
-    log.info(f"Initial gripper position: {obs.get('gripper_pos', 'N/A')}")
+    print(f"Initial joint positions: {obs['joint_positions']}")
+    print(f"Initial gripper position: {obs.get('gripper_pos', 'N/A')}")
 
     viewer_info = env.get_viewer_pose()
     print(f"Viewer info at step: {viewer_info}")
@@ -60,31 +50,30 @@ def main():
         pitch=-25.0,
         yaw=90.0,
     )
-    log.info("Camera moved to new position")
+    print("Camera moved to new position")
 
     init_joint_q = obs["joint_positions"]
     print(f"init_joint_q shape: {init_joint_q.shape}, values: {init_joint_q}")
 
     # Run a few more steps with larger movements for testing
-    log.info("Starting motion test...")
-    for i in range(100):
+    print("Starting motion test...")
+    for i in range(500):
         # Maintain current joint positions
-        action = init_joint_q
-        obs, reward, done, info = env.step(action)
+        obs, reward, done, info = env.step(init_joint_q)
 
         # Log every 10 steps
         if i % 10 == 0:
-            log.info(
-                f"Step {i}: joint_pos={obs['joint_positions'][:6]}, target={action[:6]}"
+            print(
+                f"Step {i}: joint_pos={obs['joint_positions'][:6]}, target={init_joint_q[:6]}"
             )
 
         if done:
-            log.info(f"Task completed at step {i}")
+            print(f"Task completed at step {i}")
             break
 
     # Clean up
     env.close()
-    log.info("Environment closed")
+    print("Environment closed")
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ services:
     gpus:
       - driver: nvidia
         count: all
-        capabilities: [gpu, utility]
+        capabilities: [gpu, compute, utility]
     working_dir: /workspace/lenewton/
     depends_on: [gui]
     entrypoint: ["bash"]

@@ -252,7 +252,15 @@ class LeNewtonEnv:
 
         # MuJoCo solver parameters
         self.use_mujoco_contacts = True
+        self.solver_type = "newton"
+        self.integrator = "implicitfast"
+        self.iterations = 10
         self.ls_parallel = False
+        self.ls_iterations = 100
+        self.nconmax = 1000
+        self.njmax = 2000
+        self.cone = "elliptic"
+        self.impratio = 1000.0
 
         # Camera sensor
         self.camera_sensor: SensorTiledCamera | None = None
@@ -315,15 +323,7 @@ class LeNewtonEnv:
         builder.default_shape_cfg.collision_group = -1  # Collide with everything
 
         # Load SO100 robot (fall back to flat assets layout if needed)
-        robot_xml_path = os.path.join(ASSETS_PATH, "so_arm100", "so_arm100.xml")
-        if not os.path.exists(robot_xml_path):
-            alt_path = os.path.join(ASSETS_PATH, "so_arm100.xml")
-            if os.path.exists(alt_path):
-                robot_xml_path = alt_path
-            else:
-                raise FileNotFoundError(
-                    f"SO100 robot XML not found at '{robot_xml_path}' or '{alt_path}'"
-                )
+        robot_xml_path = os.path.join(ASSETS_PATH, "so_arm100.xml")
         builder.add_mjcf(
             source=robot_xml_path,
             xform=wp.transform(
@@ -372,10 +372,14 @@ class LeNewtonEnv:
         newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
         self.solver = newton.solvers.SolverMuJoCo(
             self.model,
-            use_mujoco_cpu=True,
+            solver=self.solver_type,
+            integrator=self.integrator,
+            iterations=self.iterations,
             use_mujoco_contacts=self.use_mujoco_contacts,
             ls_parallel=self.ls_parallel,
-            njmax=200,
+            ls_iterations=self.ls_iterations,
+            nconmax=self.nconmax,
+            njmax=self.njmax,
         )
 
         # Create states
@@ -391,6 +395,14 @@ class LeNewtonEnv:
         newton.eval_fk(
             self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0
         )
+
+        self.collide_substeps = False
+        self.collision_pipeline = newton.CollisionPipelineUnified.from_model(
+            self.model,
+            rigid_contact_max_per_pair=2**8,
+            broad_phase_mode=newton.BroadPhaseMode.NXN,
+        )
+        self.contacts = self.model.collide(self.state_0, collision_pipeline=self.collision_pipeline)
 
         # Create IK solver
         self.ik_solver = SO100IKSolver(self.model, self.ee_link_index)
@@ -566,11 +578,17 @@ class LeNewtonEnv:
 
         # Simulate using MuJoCo solver (uses generalized coordinates)
         for _ in range(self.sim_substeps):
+            if self.collide_substeps:
+                self.contacts = self.model.collide(self.state_0, collision_pipeline=self.collision_pipeline)
+
             self.state_0.clear_forces()
+
+            # Apply forces to the models
+            self.viewer.apply_forces(self.state_0)
 
             # MuJoCo solver with contact handling
             self.solver.step(
-                self.state_0, self.state_1, self.control, None, self.sim_dt
+                self.state_0, self.state_1, self.control, self.contacts, self.sim_dt
             )
             self.state_0, self.state_1 = self.state_1, self.state_0
 
