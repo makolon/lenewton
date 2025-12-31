@@ -38,6 +38,7 @@ class LeNewtonFollower(Robot):
         super().__init__(config)
         self.config = config
         self.env: LeNewtonEnv | None = None
+
         self._connected = False
         self._joint_names = list(SO100_JOINTS)
         self._lower: np.ndarray | None = None

@@ -194,7 +194,7 @@ class SO100IKSolver:
 class LeNewtonEnv(gym.Env):
     """LeNewton simulation environment for SO100 robot arm."""
 
-    metadata = {"render_modes": ["rgb_array", "human"], "render_fps": FPS}
+    metadata = {"render_modes": ["rgb_array", "human"]}
 
     def __init__(
         self,
@@ -202,7 +202,6 @@ class LeNewtonEnv(gym.Env):
         task_name: str = "BlockStack",
         render_mode: str = "rgb_array",
         image_size: tuple[int, int] = IMAGE_SIZE,
-        render_fps: int = 30,
         seed: int | None = None,
         randomize: bool = True,
         use_viewer: bool = False,
@@ -222,7 +221,6 @@ class LeNewtonEnv(gym.Env):
             render_mode: Rendering mode ('rgb_array' or 'human')
             image_size: Image size (height, width)
             seed: Random seed
-            render_fps: Rendering FPS
             randomize: Whether to randomize environment
             use_viewer: Whether to use interactive viewer
             viewer_type: Type of viewer ('gl', 'usd', 'null')
@@ -238,7 +236,6 @@ class LeNewtonEnv(gym.Env):
         self.task_name = task_name
         self.render_mode = render_mode
         self.image_size = image_size
-        self.render_fps = render_fps
         self.randomize = randomize
         self.use_viewer = use_viewer
         self.viewer_type = viewer_type

@@ -31,7 +31,6 @@ def main():
         use_viewer=True,  # Set to False to disable OpenGL viewer
         viewer_type="gl",
         record_video=True,
-        render_fps=30,
     )
 
     print("Environment created successfully")
