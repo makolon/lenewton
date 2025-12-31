@@ -205,6 +205,7 @@ class LeNewtonEnv(gym.Env):
         seed: int | None = None,
         randomize: bool = True,
         use_viewer: bool = False,
+        usd_output_path: str = "simulation.usd",
         viewer_type: str = "gl",
         camera_name: str = "overhead_cam",
         camera_position: tuple[float, float, float] | None = None,
@@ -238,6 +239,7 @@ class LeNewtonEnv(gym.Env):
         self.image_size = image_size
         self.randomize = randomize
         self.use_viewer = use_viewer
+        self.usd_output_path = usd_output_path
         self.viewer_type = viewer_type
         self.seed = seed
         self.camera_name = camera_name
@@ -319,7 +321,9 @@ class LeNewtonEnv(gym.Env):
             if self.viewer_type == "gl":
                 self.viewer = newton.viewer.ViewerGL()
             elif self.viewer_type == "usd":
-                self.viewer = newton.viewer.ViewerUSD()
+                self.viewer = newton.viewer.ViewerUSD(
+                    output_path=self.usd_output_path
+                )
             else:
                 self.viewer = newton.viewer.ViewerNull()
         else:
@@ -985,7 +989,7 @@ class LeNewtonEnv(gym.Env):
             pitch: Camera pitch angle in degrees
             yaw: Camera yaw angle in degrees
         """
-        if self.viewer is None:
+        if self.viewer is None or self.viewer_type != "gl":
             return
 
         new_pos = wp.vec3(*pos) if pos is not None else self.viewer.camera.pos
@@ -1001,7 +1005,7 @@ class LeNewtonEnv(gym.Env):
         Returns:
             Dictionary with camera position and orientation
         """
-        if self.viewer is None:
+        if self.viewer is None or self.viewer_type != "gl":
             return {}
 
         cam_pos, cam_pitch, cam_yaw = (

@@ -61,6 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     swig \
     unzip \
     vim \
+    vulkan-tools \
     wget \
     xvfb \
     x11-apps \

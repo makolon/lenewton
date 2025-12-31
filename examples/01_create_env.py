@@ -29,7 +29,7 @@ def main():
         render_mode="rgb_array",
         image_size=(480, 640),
         use_viewer=True,  # Set to False to disable OpenGL viewer
-        viewer_type="gl",
+        viewer_type="usd",
         record_video=True,
     )
 
@@ -58,7 +58,8 @@ def main():
     print("Starting motion test...")
     for i in range(500):
         # Maintain current joint positions
-        obs, reward, terminated, truncated, info = env.step(init_joint_q)
+        action = init_joint_q + 0.05 * (-1 + 2 * env.np_random.random(env.robot_dof_count))
+        obs, reward, terminated, truncated, info = env.step(action)
 
         # Log every 10 steps
         if i % 10 == 0:
