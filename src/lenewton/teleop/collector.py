@@ -48,7 +48,7 @@ class DatasetCollector:
             teleop_mode=True,
             randomize=True,
         )
-        self.env.reset()
+        _, _ = self.env.reset()
         self.env.set_viewer_pose(
             pos=[0.0, -1.25, 0.5],
             pitch=-25.0,
@@ -85,7 +85,7 @@ class DatasetCollector:
     def _stabilize_environment(self) -> None:
         """Warm up the environment with default joint positions."""
         for _ in range(10):
-            self.env.step(DEFAULT_JOINTS)
+            _, _, _, _, _ = self.env.step(DEFAULT_JOINTS)
 
     def _recreate_environment(self) -> None:
         """Close current environment and create new one with a random seed."""
@@ -104,7 +104,7 @@ class DatasetCollector:
             teleop_mode=True,
             randomize=True,
         )
-        self.env.reset()
+        _, _ = self.env.reset()
         print("New environment created")
 
         self.action_dim = self.env.robot_dof_count
@@ -195,7 +195,15 @@ class DatasetCollector:
 
         joints_rad = np.deg2rad(joints) + self.joint_offsets
 
-        observation, reward, done, info = self.env.step(joints_rad)
+        (
+            observation,
+            reward,
+            terminated,
+            truncated,
+            info,
+        ) = self.env.step(joints_rad)
+        done = terminated or truncated
+        info = {**info, "terminated": terminated, "truncated": truncated}
 
         self.previous_joint_targets = joints_rad.copy()
         self.current_gripper = joints_rad[-1]

@@ -5,11 +5,13 @@ import os
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+import gymnasium as gym
 import newton
 import newton.ik
 import newton.viewer
 import numpy as np
 import warp as wp
+from gymnasium import spaces
 from newton.selection import ArticulationView
 from newton.sensors import SensorTiledCamera
 
@@ -45,7 +47,7 @@ EE_LINK_NAME = "gripper"
 SO100_ARTICULATION_PATTERN = "so_arm100"
 
 # Default joint positions
-DEFAULT_JOINTS = np.array([0.0, 1.0, -1.5, 0.0, 0.0, 0.0])
+DEFAULT_JOINTS = np.array([0.0, -np.pi/2, np.pi/2, 0.0, 0.0, 0.0])
 
 # Gripper values
 GRIPPER_OPEN = 2.0
@@ -189,8 +191,10 @@ class SO100IKSolver:
 ###
 
 
-class LeNewtonEnv:
+class LeNewtonEnv(gym.Env):
     """LeNewton simulation environment for SO100 robot arm."""
+
+    metadata = {"render_modes": ["rgb_array", "human"], "render_fps": FPS}
 
     def __init__(
         self,
@@ -199,9 +203,15 @@ class LeNewtonEnv:
         render_mode: str = "rgb_array",
         image_size: tuple[int, int] = IMAGE_SIZE,
         render_fps: int = 30,
+        seed: int | None = None,
         randomize: bool = True,
         use_viewer: bool = False,
         viewer_type: str = "gl",
+        camera_name: str = "overhead_cam",
+        camera_position: tuple[float, float, float] | None = None,
+        camera_pitch: float | None = None,
+        camera_yaw: float | None = None,
+        camera_fov: float | None = None,
         **kwargs,
     ):
         """Initialize LeNewton environment.
@@ -216,7 +226,14 @@ class LeNewtonEnv:
             randomize: Whether to randomize environment
             use_viewer: Whether to use interactive viewer
             viewer_type: Type of viewer ('gl', 'usd', 'null')
+            camera_name: Key name for the main camera observation
+            camera_position: Initial camera position (x, y, z)
+            camera_pitch: Initial camera pitch angle in degrees
+            camera_yaw: Initial camera yaw angle in degrees
+            camera_fov: Camera field of view in degrees
         """
+        super().__init__()
+
         self.task = task
         self.task_name = task_name
         self.render_mode = render_mode
@@ -225,6 +242,12 @@ class LeNewtonEnv:
         self.randomize = randomize
         self.use_viewer = use_viewer
         self.viewer_type = viewer_type
+        self._seed = seed
+        self.camera_name = camera_name
+        self.camera_position = camera_position or DEFAULT_CAMERA_POSITION
+        self.camera_pitch = camera_pitch if camera_pitch is not None else DEFAULT_CAMERA_PITCH
+        self.camera_yaw = camera_yaw if camera_yaw is not None else DEFAULT_CAMERA_YAW
+        self.camera_fov = camera_fov if camera_fov is not None else DEFAULT_CAMERA_FOV
 
         # Simulation parameters
         self.fps = FPS
@@ -267,7 +290,7 @@ class LeNewtonEnv:
         self.camera_rays = None
         self.camera_color_image = None
         self.camera_depth_image = None
-        self.camera_fov = DEFAULT_CAMERA_FOV
+        self.camera_fov = float(self.camera_fov)
 
         # Robot info
         self.robot_body_count = 0
@@ -290,6 +313,9 @@ class LeNewtonEnv:
         # Build environment
         self._build_environment()
 
+        # Gym spaces
+        self._initialize_spaces()
+
     def _build_environment(self):
         """Build the Newton simulation environment."""
         # Create viewer based on settings
@@ -305,6 +331,7 @@ class LeNewtonEnv:
 
         # Create model builder
         builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
+        newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
 
         # Set default joint configuration
         builder.default_joint_cfg = newton.ModelBuilder.JointDofConfig(
@@ -345,12 +372,13 @@ class LeNewtonEnv:
         # Find end-effector link index
         self.ee_link_index = self._find_link_index(builder, EE_LINK_NAME)
 
+        # Set drive stiffness/damping for joint targets (PD control)
+        for i in range(len(builder.joint_target_ke)):
+            builder.joint_target_ke[i] = 500.0
+            builder.joint_target_kd[i] = 50.0
+
         # Set default joint positions
-        if builder.joint_coord_count >= NUM_JOINTS:
-            for i, val in enumerate(
-                DEFAULT_JOINTS[: min(NUM_JOINTS, builder.joint_coord_count)]
-            ):
-                builder.joint_q[i] = val
+        builder.joint_q[:NUM_JOINTS] = DEFAULT_JOINTS
 
         # Store builder reference for task setup
         self.builder = builder
@@ -369,7 +397,6 @@ class LeNewtonEnv:
         self.initial_joint_q = self.model.joint_q.numpy().copy()
 
         # Create solver with increased constraint limits to handle collisions
-        newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
         self.solver = newton.solvers.SolverMuJoCo(
             self.model,
             solver=self.solver_type,
@@ -440,7 +467,6 @@ class LeNewtonEnv:
             ),
         )
 
-        # Compute camera rays for pinhole camera model
         self.camera_rays = self.camera_sensor.compute_pinhole_camera_rays(
             math.radians(self.camera_fov)
         )
@@ -462,36 +488,91 @@ class LeNewtonEnv:
         # Compute extrinsic matrix from camera pose
         camera_transform = self._get_camera_transform()
         # Convert to 4x4 extrinsic matrix (world to camera)
-        pos = np.array(
-            [camera_transform[0][0], camera_transform[0][1], camera_transform[0][2]]
+        pos = np.array([camera_transform.p[0], camera_transform.p[1], camera_transform.p[2]])
+        rot_wp = wp.array(
+            [wp.quat_to_matrix(camera_transform.q)], dtype=wp.mat33, device="cpu"
         )
-        quat = camera_transform[1]  # wp.quatf
-        rot = wp.quat_to_matrix(quat)
-        rot_wp = wp.array([rot], dtype=wp.mat33, device="cpu")
         rot_matrix = rot_wp.numpy()[0]
         extrinsic = np.eye(4)
         extrinsic[:3, :3] = rot_matrix.T  # Transpose for world-to-camera
         extrinsic[:3, 3] = -rot_matrix.T @ pos
 
-        self.camera_params["overhead_cam"] = SimpleNamespace(
+        self.camera_params[self.camera_name] = SimpleNamespace(
             intrinsic_matrix=intrinsic,
             extrinsic_matrix=extrinsic,
             position=pos,
             fov=self.camera_fov,
         )
 
-    def _get_camera_transform(self) -> tuple[tuple[float, float, float], wp.quatf]:
-        """Get camera transform (position and orientation).
+    def _initialize_spaces(self):
+        """Initialize Gymnasium action and observation spaces."""
+        if self.model is None:
+            return
 
-        Returns:
-            Tuple of (position, quaternion)
-        """
-        # Default overhead camera looking at robot workspace
-        pos = DEFAULT_CAMERA_POSITION
-        pitch = math.radians(DEFAULT_CAMERA_PITCH)
-        yaw = math.radians(DEFAULT_CAMERA_YAW)
+        joint_lower = np.array(
+            self.model.joint_limit_lower.numpy().flatten()[: self.robot_dof_count],
+            dtype=np.float32,
+        )
+        joint_upper = np.array(
+            self.model.joint_limit_upper.numpy().flatten()[: self.robot_dof_count],
+            dtype=np.float32,
+        )
 
-        # Build rotation matrix from pitch and yaw
+        self._action_space = spaces.Box(
+            low=joint_lower,
+            high=joint_upper,
+            dtype=np.float32,
+        )
+
+        object_spaces: dict[str, spaces.Dict] = {}
+        for i in range(self.robot_body_count, self.model.body_count):
+            body_name = self.body_names[i] if i < len(self.body_names) else f"body_{i}"
+            object_spaces[body_name] = spaces.Dict(
+                {
+                    "position": spaces.Box(
+                        low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
+                    ),
+                    "quaternion": spaces.Box(
+                        low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32
+                    ),
+                }
+            )
+
+        self._observation_space = spaces.Dict(
+            {
+                "joint_positions": spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(self.robot_dof_count,),
+                    dtype=np.float32,
+                ),
+                "joint_velocities": spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(self.robot_dof_count,),
+                    dtype=np.float32,
+                ),
+                "gripper_pos": spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
+                ),
+                "gripper_quat": spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32
+                ),
+                self.camera_name: spaces.Box(
+                    low=0,
+                    high=255,
+                    shape=(self.image_size[0], self.image_size[1], 4),
+                    dtype=np.uint8,
+                ),
+                **object_spaces,
+            }
+        )
+
+    def _get_camera_transform(self) -> wp.transformf:
+        """Get camera transform (position and orientation)."""
+        pitch = math.radians(self.camera_pitch)
+        yaw = math.radians(self.camera_yaw)
+
         # Camera looks along -Z in its local frame
         cy, sy = math.cos(yaw), math.sin(yaw)
         cp, sp = math.cos(pitch), math.sin(pitch)
@@ -500,7 +581,41 @@ class LeNewtonEnv:
         rot = wp.mat33f(cy * cp, -sy, cy * sp, sy * cp, cy, sy * sp, -sp, 0.0, cp)
         quat = wp.quat_from_matrix(rot)
 
-        return (pos, quat)
+        return wp.transformf(wp.vec3f(*self.camera_position), quat)
+
+    def set_camera_pose(
+        self,
+        *,
+        position: tuple[float, float, float] | None = None,
+        pitch: float | None = None,
+        yaw: float | None = None,
+        fov: float | None = None,
+    ) -> None:
+        """Update main camera pose/FOV for rendering and observations."""
+        if position is not None:
+            self.camera_position = tuple(position)
+        if pitch is not None:
+            self.camera_pitch = pitch
+        if yaw is not None:
+            self.camera_yaw = yaw
+        if fov is not None:
+            self.camera_fov = fov
+
+        self.camera_rays = self.camera_sensor.compute_pinhole_camera_rays(
+            math.radians(self.camera_fov)
+        )
+        self._update_camera_params()
+
+    def get_camera_pose(self) -> dict[str, float]:
+        """Return current camera pose/FOV."""
+        return {
+            "position_x": self.camera_position[0],
+            "position_y": self.camera_position[1],
+            "position_z": self.camera_position[2],
+            "pitch": self.camera_pitch,
+            "yaw": self.camera_yaw,
+            "fov": self.camera_fov,
+        }
 
     def _find_link_index(self, builder: newton.ModelBuilder, link_name: str) -> int:
         """Find the index of a link by name.
@@ -517,12 +632,18 @@ class LeNewtonEnv:
                 return i
         return 0
 
-    def reset(self, **kwargs) -> dict[str, Any]:
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Reset the environment.
 
         Returns:
-            Initial observation dictionary
+            Tuple of (observation, info)
         """
+        if seed is None:
+            seed = self._seed
+        super().reset(seed=seed)
+        self._seed = seed
         self.sim_time = 0.0
 
         # Reset joint positions to initial configuration
@@ -557,18 +678,23 @@ class LeNewtonEnv:
 
         self.episode_count += 1
 
-        return self._get_observation()
+        observation = self._get_observation()
+        info = {"sim_time": self.sim_time}
+        if self.task is not None:
+            info.update(self.task.get_info(self))
+
+        return observation, info
 
     def step(
         self, action: np.ndarray
-    ) -> tuple[dict[str, Any], float, bool, dict[str, Any]]:
+    ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         """Execute an action in the environment.
 
         Args:
             action: Joint position targets for the SO100 arm (one value per actuated DOF)
 
         Returns:
-            Tuple of (observation, reward, done, info)
+            Tuple of (observation, reward, terminated, truncated, info)
         """
         # Ensure action is the correct size
         action = np.asarray(action, dtype=np.float32).flatten()
@@ -615,19 +741,21 @@ class LeNewtonEnv:
 
         # Get reward and done from task
         reward = 0.0
-        done = False
+        terminated = False
+        truncated = False
         info: dict[str, Any] = {"sim_time": self.sim_time}
 
         if self.task is not None:
             reward = self.task.get_reward(self)
-            done = self.task.get_done(self)
+            truncated = self.task.step_count >= self.task.max_steps
+            terminated = self.task.get_done(self) and not truncated
             info.update(self.task.get_info(self))
 
         # Update viewer
         if self.use_viewer and self.viewer is not None:
             self._update_viewer()
 
-        return observation, reward, done, info
+        return observation, reward, terminated, truncated, info
 
     def move_to_pose(
         self,
@@ -635,7 +763,7 @@ class LeNewtonEnv:
         quaternion: np.ndarray,
         gripper: float,
         steps: int = SIM_STEPS,
-    ) -> tuple[dict[str, Any], float, bool, dict[str, Any]]:
+    ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         """Move the robot to a target pose using IK.
 
         Args:
@@ -645,7 +773,7 @@ class LeNewtonEnv:
             steps: Number of simulation steps
 
         Returns:
-            Tuple of (observation, reward, done, info)
+            Tuple of (observation, reward, terminated, truncated, info)
         """
         # Get current joint positions
         current_q = self.model.joint_q.numpy().copy()
@@ -664,21 +792,22 @@ class LeNewtonEnv:
 
         observation = self._get_observation()
         reward = 0.0
-        done = False
+        terminated = False
+        truncated = False
         info: dict[str, Any] = {}
 
         # Execute motion
         for _ in range(steps):
-            observation, reward, done, info = self.step(target_q_robot)
+            observation, reward, terminated, truncated, info = self.step(target_q_robot)
 
-            if done:
+            if terminated or truncated:
                 break
 
             # Update viewer
             if self.use_viewer and self.viewer is not None:
                 self._update_viewer()
 
-        return observation, reward, done, info
+        return observation, reward, terminated, truncated, info
 
     def render(self) -> np.ndarray | None:
         """Render the environment using SensorTiledCamera.
@@ -686,61 +815,23 @@ class LeNewtonEnv:
         Returns:
             RGB image array or None
         """
+        if self.render_mode not in self.metadata["render_modes"]:
+            raise ValueError(f"Unsupported render mode: {self.render_mode}")
+
+        if self.render_mode == "human":
+            if self.viewer is not None:
+                self._update_viewer()
+            return None
+
         if self.model is None or self.state_0 is None:
-            return np.zeros((*self.image_size, 3), dtype=np.uint8)
+            return np.zeros((*self.image_size, 4), dtype=np.uint8)
 
         # Update FK for rendering
         newton.eval_fk(
             self.model, self.model.joint_q, self.model.joint_qd, self.state_0
         )
 
-        # Compute camera orientation (use default camera settings)
-        camera_pos = wp.vec3f(*DEFAULT_CAMERA_POSITION)
-        camera_target = wp.vec3f(0.0, 0.0, 0.0)  # Look at robot workspace
-
-        # Compute forward direction
-        forward = wp.normalize(camera_target - camera_pos)
-
-        # Compute right and up vectors
-        world_up = wp.vec3f(0.0, 0.0, 1.0)
-        right = wp.normalize(wp.cross(forward, world_up))
-        up = wp.cross(right, forward)
-
-        # Create rotation matrix and convert to quaternion
-        # Rotation matrix columns: right, up, -forward (camera looks along -Z)
-        m00, m01, m02 = right[0], up[0], -forward[0]
-        m10, m11, m12 = right[1], up[1], -forward[1]
-        m20, m21, m22 = right[2], up[2], -forward[2]
-
-        # Convert rotation matrix to quaternion
-        trace = m00 + m11 + m22
-        if trace > 0:
-            s = 0.5 / math.sqrt(trace + 1.0)
-            w = 0.25 / s
-            x = (m21 - m12) * s
-            y = (m02 - m20) * s
-            z = (m10 - m01) * s
-        elif m00 > m11 and m00 > m22:
-            s = 2.0 * math.sqrt(1.0 + m00 - m11 - m22)
-            w = (m21 - m12) / s
-            x = 0.25 * s
-            y = (m01 + m10) / s
-            z = (m02 + m20) / s
-        elif m11 > m22:
-            s = 2.0 * math.sqrt(1.0 + m11 - m00 - m22)
-            w = (m02 - m20) / s
-            x = (m01 + m10) / s
-            y = 0.25 * s
-            z = (m12 + m21) / s
-        else:
-            s = 2.0 * math.sqrt(1.0 + m22 - m00 - m11)
-            w = (m10 - m01) / s
-            x = (m02 + m20) / s
-            y = (m12 + m21) / s
-            z = 0.25 * s
-
-        camera_quat = wp.quatf(x, y, z, w)
-        camera_transform = wp.transformf(camera_pos, camera_quat)
+        camera_transform = self._get_camera_transform()
 
         # Create camera transforms array
         camera_transforms = wp.array(
@@ -775,13 +866,13 @@ class LeNewtonEnv:
             self.robot_view.get_attribute("joint_q", self.state_0)
             .numpy()
             .reshape(-1)
-            .copy()
+            .astype(np.float32)
         )
         joint_qd = (
             self.robot_view.get_attribute("joint_qd", self.state_0)
             .numpy()
             .reshape(-1)
-            .copy()
+            .astype(np.float32)
         )
 
         observation["joint_positions"] = joint_q
@@ -789,12 +880,22 @@ class LeNewtonEnv:
 
         # End-effector pose
         ee_pos, ee_orn = self.ik_solver.solve_fk(joint_q, self.state_0)
-        observation["gripper_pos"] = ee_pos
-        observation["gripper_quat"] = ee_orn
+        observation["gripper_pos"] = ee_pos.astype(np.float32)
+        observation["gripper_quat"] = ee_orn.astype(np.float32)
 
         # Camera image
         image = self.render()
-        observation["overhead_cam"] = image
+        if image is None:
+            image = np.zeros(
+                (self.image_size[0], self.image_size[1], 4), dtype=np.uint8
+            )
+        else:
+            if hasattr(image, "numpy"):
+                image = image.numpy()
+            elif not isinstance(image, np.ndarray):
+                image = np.asarray(image)
+            image = image.astype(np.uint8, copy=False)
+        observation[self.camera_name] = image
 
         # Body positions for objects
         body_q = self.state_0.body_q.numpy()
@@ -802,8 +903,8 @@ class LeNewtonEnv:
         for i in range(self.robot_body_count, self.model.body_count):
             body_name = self.body_names[i] if i < len(self.body_names) else f"body_{i}"
             observation[body_name] = {
-                "position": body_q[i, 4:7].copy(),
-                "quaternion": body_q[i, 0:4].copy(),
+                "position": body_q[i, 4:7].astype(np.float32),
+                "quaternion": body_q[i, 0:4].astype(np.float32),
             }
 
         return observation
@@ -819,26 +920,18 @@ class LeNewtonEnv:
         self.control = None
         self.solver = None
         self.ik_solver = None
+        self._action_space = None
+        self._observation_space = None
 
     @property
-    def action_space(self):
-        """Get action space dimensions."""
-        if self.robot_view is not None:
-            return self.robot_dof_count
-        if self.model is not None:
-            return self.model.joint_dof_count
-        return NUM_JOINTS
+    def action_space(self) -> spaces.Box:
+        """Gymnasium action space."""
+        return self._action_space
 
     @property
-    def observation_space(self):
-        """Get observation space (placeholder)."""
-        return {
-            "joint_positions": (self.robot_dof_count,),
-            "joint_velocities": (self.robot_dof_count,),
-            "gripper_pos": (3,),
-            "gripper_quat": (4,),
-            "overhead_cam": (*self.image_size, 3),
-        }
+    def observation_space(self) -> spaces.Dict:
+        """Gymnasium observation space."""
+        return self._observation_space
 
     def get_object_positions(self) -> dict[str, np.ndarray]:
         """Get positions of all objects in the environment.
@@ -896,13 +989,9 @@ class LeNewtonEnv:
         if self.viewer is None:
             return
 
-        # Use provided values or keep current
-        if pos is not None:
-            new_pos = wp.vec3(*pos)
-        if pitch is not None:
-            new_pitch = pitch
-        if yaw is not None:
-            new_yaw = yaw
+        new_pos = wp.vec3(*pos) if pos is not None else self.viewer.camera.pos
+        new_pitch = pitch if pitch is not None else self.viewer.camera.pitch
+        new_yaw = yaw if yaw is not None else self.viewer.camera.yaw
 
         # Set camera using viewer's set_camera method
         self.viewer.set_camera(new_pos, new_pitch, new_yaw)
