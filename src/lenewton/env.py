@@ -239,7 +239,7 @@ class LeNewtonEnv(gym.Env):
         self.randomize = randomize
         self.use_viewer = use_viewer
         self.viewer_type = viewer_type
-        self._seed = seed
+        self.seed = seed
         self.camera_name = camera_name
         self.camera_position = camera_position or DEFAULT_CAMERA_POSITION
         self.camera_pitch = camera_pitch if camera_pitch is not None else DEFAULT_CAMERA_PITCH
@@ -638,9 +638,9 @@ class LeNewtonEnv(gym.Env):
             Tuple of (observation, info)
         """
         if seed is None:
-            seed = self._seed
+            seed = self.seed
         super().reset(seed=seed)
-        self._seed = seed
+        self.seed = seed
         self.sim_time = 0.0
 
         # Reset joint positions to initial configuration
