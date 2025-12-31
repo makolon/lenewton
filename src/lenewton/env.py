@@ -287,7 +287,6 @@ class LeNewtonEnv(gym.Env):
         self.camera_rays = None
         self.camera_color_image = None
         self.camera_depth_image = None
-        self.camera_fov = float(self.camera_fov)
 
         # Robot info
         self.robot_body_count = 0
@@ -486,6 +485,8 @@ class LeNewtonEnv(gym.Env):
         camera_transform = self._get_camera_transform()
         # Convert to 4x4 extrinsic matrix (world to camera)
         pos = np.array([camera_transform.p[0], camera_transform.p[1], camera_transform.p[2]])
+        orn = np.array([camera_transform.q[0], camera_transform.q[1], camera_transform.q[2], camera_transform.q[3]])
+
         rot_wp = wp.array(
             [wp.quat_to_matrix(camera_transform.q)], dtype=wp.mat33, device="cpu"
         )
@@ -498,6 +499,7 @@ class LeNewtonEnv(gym.Env):
             intrinsic_matrix=intrinsic,
             extrinsic_matrix=extrinsic,
             position=pos,
+            orientation=orn,
             fov=self.camera_fov,
         )
 
