@@ -29,15 +29,14 @@ def main():
         render_mode="rgb_array",
         image_size=(480, 640),
         use_viewer=True,  # Set to False to disable OpenGL viewer
-        viewer_type="gl",
+        viewer_type="usd",
         record_video=True,
-        render_fps=30,
     )
 
     print("Environment created successfully")
 
     # Reset environment
-    obs = env.reset()
+    obs, info = env.reset()
     print(f"Initial joint positions: {obs['joint_positions']}")
     print(f"Initial gripper position: {obs.get('gripper_pos', 'N/A')}")
 
@@ -59,7 +58,8 @@ def main():
     print("Starting motion test...")
     for i in range(500):
         # Maintain current joint positions
-        obs, reward, done, info = env.step(init_joint_q)
+        action = init_joint_q + 0.05 * (-1 + 2 * env.np_random.random(env.robot_dof_count))
+        obs, reward, terminated, truncated, info = env.step(action)
 
         # Log every 10 steps
         if i % 10 == 0:
@@ -67,7 +67,7 @@ def main():
                 f"Step {i}: joint_pos={obs['joint_positions'][:6]}, target={init_joint_q[:6]}"
             )
 
-        if done:
+        if terminated or truncated:
             print(f"Task completed at step {i}")
             break
 

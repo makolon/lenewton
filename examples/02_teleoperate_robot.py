@@ -23,16 +23,19 @@ def parse_args() -> argparse.Namespace:
         help="LeNewton task name (default: BlockStack)",
     )
     parser.add_argument(
-        "--host",
-        type=str,
-        default="localhost",
-        help="Socket host address (default: localhost)",
-    )
-    parser.add_argument(
-        "--port", type=int, default=12345, help="Socket port (default: 12345)"
-    )
-    parser.add_argument(
         "--seed", type=int, default=12345, help="Random seed (default: 12345)"
+    )
+    parser.add_argument(
+        "--leader-port",
+        type=str,
+        default="/dev/ttyUSB0",
+        help="Serial port for SO100 leader (default: /dev/ttyUSB0)",
+    )
+    parser.add_argument(
+        "--leader-id",
+        type=str,
+        default="leader",
+        help="Identifier for the leader teleoperator",
     )
     parser.add_argument("--no-viewer", action="store_true", help="Disable viewer")
     parser.add_argument(
@@ -64,9 +67,8 @@ def main() -> None:
 
     collector = DatasetCollector(
         task_name=args.task,
-        socket_host=args.host,
-        socket_port=args.port,
-        seed=args.seed,
+        leader_port=args.leader_port,
+        leader_id=args.leader_id,
         use_viewer=not args.no_viewer,
         record_frequency=args.record_hz,
     )
